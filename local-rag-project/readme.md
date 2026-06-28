@@ -121,6 +121,3 @@ local-rag-project/
 * Token Streaming
 * Multi-user Session Management
 
-## License
-
-MIT License

@@ -21,7 +21,9 @@ def get_query_intent(query: str) -> str:
     messages = [SystemMessage(content=routing_instruction), HumanMessage(content=query)]
     
     # We use temperature 0 for strict, predictable classification
-    chat_model = ChatOllama(model=config.LLM_MODEL, temperature=0.0)
+    chat_model = ChatOllama(
+        model=config.LLM_MODEL, temperature=0.0, base_url=config.OLLAMA_BASE_URL
+    )
     response = chat_model.invoke(messages).content.strip().upper()
     
     # Fallback to SEARCH if the LLM says anything weird
@@ -36,7 +38,9 @@ def generate_chat_response(query: str, chat_history):
     messages.append(HumanMessage(content=query))
     
     # Temperature 0.4 allows for natural conversation
-    chat_model = ChatOllama(model=config.LLM_MODEL, temperature=0.4)
+    chat_model = ChatOllama(
+        model=config.LLM_MODEL, temperature=0.4, base_url=config.OLLAMA_BASE_URL
+    )
     return chat_model.invoke(messages).content
     
 
@@ -78,7 +82,9 @@ Guidelines:
 
     # 5. Initialize connection with temperature=0.0 for strict extraction
     print(f"[Generation] Invoking local model {config.LLM_MODEL}...")
-    chat_model = ChatOllama(model=config.LLM_MODEL, temperature=0.2)
+    chat_model = ChatOllama(
+        model=config.LLM_MODEL, temperature=0.2, base_url=config.OLLAMA_BASE_URL
+    )
     
     response = chat_model.invoke(messages)
     return response.content, retrieved_docs
@@ -101,9 +107,60 @@ def rewrite_query(query: str, chat_history) -> str:
     messages.extend(chat_history)
     messages.append(HumanMessage(content=f"Rephrase this follow-up question: {query}"))
     
-    chat_model = ChatOllama(model=config.LLM_MODEL, temperature=0.0)
+    chat_model = ChatOllama(
+        model=config.LLM_MODEL, temperature=0.0, base_url=config.OLLAMA_BASE_URL
+    )
     response = chat_model.invoke(messages)
     
     clean_query = response.content.strip().strip('"').strip("'")
     print(f"[Query Router] Reformulated query to: '{clean_query}'")
     return clean_query
+
+
+async def generate_answer_stream(query: str, retrieved_docs, chat_history):
+    """Asynchronously yields tokens from the LLM based on retrieved context."""
+    context_segments = []
+    for i, doc in enumerate(retrieved_docs):
+        source_page = doc.metadata.get("page", "Unknown")
+        context_segments.append(f"--- Context Segment {i+1} (Page {source_page}) ---\n{doc.page_content}")
+
+    compiled_context = "\n\n".join(context_segments)
+
+    system_instruction = """You are a document question-answering system. 
+Your task is to answer questions strictly from the provided document context.
+
+Guidelines:
+- Treat the document context as the only source of truth.
+- Use chat history only to resolve references and follow-up questions.
+- If evidence is missing, respond exactly: 'I cannot find the answer in the provided document.'"""
+
+    contextualized_query = (
+        f"DOCUMENT CONTEXT:\n{compiled_context}\n\n"
+        f"USER QUESTION: {query}\n\n"
+        "DETAILED ANSWER:"
+    )
+
+    messages = [SystemMessage(content=system_instruction)]
+    messages.extend(chat_history)  
+    messages.append(HumanMessage(content=contextualized_query)) 
+
+    chat_model = ChatOllama(
+        model=config.LLM_MODEL, temperature=0.0, base_url=config.OLLAMA_BASE_URL
+    )
+    
+    # Asynchronously yield each token as it is generated
+    async for chunk in chat_model.astream(messages):
+        yield chunk.content
+
+async def generate_chat_response_stream(query: str, chat_history):
+    """Asynchronously yields tokens for general chitchat."""
+    instruction = "You are a helpful and polite AI assistant. Keep your responses brief, friendly, and conversational."
+    messages = [SystemMessage(content=instruction)]
+    messages.extend(chat_history)
+    messages.append(HumanMessage(content=query))
+    
+    chat_model = ChatOllama(
+        model=config.LLM_MODEL, temperature=0.4, base_url=config.OLLAMA_BASE_URL
+    )
+    async for chunk in chat_model.astream(messages):
+        yield chunk.content

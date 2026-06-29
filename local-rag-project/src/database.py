@@ -6,7 +6,10 @@ import config
 
 def get_embedding_model():
     # Initializes the local embedding model.
-    return OllamaEmbeddings(model = config.EMBEDDING_MODEL)
+    return OllamaEmbeddings(
+        model=config.EMBEDDING_MODEL,
+        base_url=config.OLLAMA_BASE_URL,
+    )
 
 def clear_db():
     """Deletes the existing vector database directory to ensure a clean slate."""

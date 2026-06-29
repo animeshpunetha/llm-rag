@@ -1,3 +1,4 @@
+import os
 import numpy as np 
 import redis
 from redis.commands.search.field import TextField, VectorField
@@ -7,17 +8,22 @@ from langchain_ollama import OllamaEmbeddings
 import config
 
 class SemanticCache:
-    def __init__(self, host='localhost', port=6379, threshold=0.15):
+    def __init__(self, host=None, port=None, threshold=0.15):
         """
         Initializes the Redis connection and sets up the vector search index.
         threshold = 0.05 means questions must be 95% similar to trigger a cache hit.
         """
+        host = host or config.REDIS_HOST
+        port = port or config.REDIS_PORT
         self.redis_client = redis.Redis(host=host, port=port, decode_responses=False)
         self.threshold = threshold
         self.index_name = "rag_cache_index"
 
         # Initialize the exact same embedding model used for the ChromaDB chunks
-        self.embeddings = OllamaEmbeddings(model = config.EMBEDDING_MODEL)
+        self.embeddings = OllamaEmbeddings(
+            model=config.EMBEDDING_MODEL,
+            base_url=config.OLLAMA_BASE_URL,
+        )
 
         self._setup_index()
 

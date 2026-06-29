@@ -1,0 +1,88 @@
+services:
+  rag-api:
+    build: .
+    container_name: rag_api_service
+    ports:
+      - "8000:8000"
+    depends_on:
+      semantic-cache:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+      ollama-init:
+        condition: service_completed_successfully
+    environment:
+      REDIS_HOST: semantic-cache
+      REDIS_PORT: 6379
+      OLLAMA_HOST: http://ollama:11434
+      LLM_MODEL: qwen2.5:7b
+      EMBEDDING_MODEL: nomic-embed-text
+    volumes:
+      - ./data:/app/data
+      - ./db:/app/db
+    restart: unless-stopped
+
+  semantic-cache:
+    image: redis/redis-stack-server:latest
+    container_name: rag_semantic_cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  ollama-init:
+    image: curlimages/curl:latest
+    container_name: rag_ollama_init
+    depends_on:
+      ollama:
+        condition: service_started
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      LLM_MODEL: qwen2.5:7b
+      EMBEDDING_MODEL: nomic-embed-text
+    volumes:
+      - ./scripts/pull-ollama-models.sh:/pull-ollama-models.sh:ro
+    entrypoint: ["/bin/sh", "/pull-ollama-models.sh"]
+    restart: "no"
+
+  build-db:
+    build: .
+    container_name: rag_build_db
+    profiles: ["tools"]
+    depends_on:
+      ollama:
+        condition: service_started
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      EMBEDDING_MODEL: nomic-embed-text
+    volumes:
+      - ./data:/app/data
+      - ./db:/app/db
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until curl -sf "$${OLLAMA_HOST}/api/tags" >/dev/null; do
+          echo "Waiting for Ollama..."
+          sleep 2
+        done
+        python build_db.py
+    restart: "no"
+
+volumes:
+  redis_data:
+  ollama_data:
